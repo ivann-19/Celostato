@@ -7,18 +7,26 @@
 #include	"lpc17xx_pwm.h"
 #include	"lpc17xx_clkpwr.h"
 #include	"lpc17xx_uart.h"
-#include <stdlib.h>
+#include 	<stdlib.h>
+#include	<stdio.h>
+#include 	<string.h>
 
-uint32_t* datos = (uint32_t*) 0x2007C000;
-uint32_t aux[18];
-uint32_t steps[18];
+
+uint32_t adc[2];
+char* datos = (char*) 0x2007C000;
+char info[] = {"La tension es: \n"};
+char info2[] = {"La posicion angular es: \n"};
+uint32_t aux[19];
+uint32_t steps[19];
+//uint32_t* pos = (uint32_t*) 0x2007D000;
+uint8_t pos = 0;
 
 void confPines();
 void confTimers();
-void confADC();
+void confUART();
 void confPWM();
 void confDMA();
-void confUART();
+void confADC();
 void delayTim();
 void delay3();
 //void retardo(uint32_t);
@@ -26,34 +34,28 @@ void delay3();
 int main () {
 	uint32_t i;
 
-	for (i=0; i<18; i++) {
-		aux[i] = 500+i*111;
+	for (i=0; i<19; i++) {
+		aux[i] = 400+i*116.66;
 	}
-	for (i=0; i<18; i++) {
-		steps[i] = 227.55*i;
+	for (i=0; i<19; i++) {
+		steps[i] = 227.5*i;
 	}
 	confPines();
 	//confTimers();
 	confPWM();
-	//confDMA();
+	confDMA();
+	confUART();
 	confADC();
-//	confUART();
 
 	while (1) {
-		/*		for(i=500; i<2500; i+=100) {
-			LPC_PWM1->MR1 = i;
-			LPC_PWM1->LER |= (1<<1);
-			//delayTim();
-			delay3();
-		}
-*/	}
+/*		for(i=400; i<2600; i+=100) {
+		LPC_PWM1->MR1 = i;
+		LPC_PWM1->LER |= (1<<1);
+		//delayTim();
+		delay3();
+*/		}
 	return 0;
 }
-	/*
-void retardo (uint32_t tiempo) {
-	return;
-}
-*/
 
 void confPines() {
 
@@ -79,8 +81,10 @@ void confPines() {
 	ext.Pinmode = PINSEL_PINMODE_PULLUP;
 	ext.Funcnum = 1;
 	PINSEL_ConfigPin(&ext);
-
-	//NVIC_EnableIRQ(EINT0_IRQn);
+	LPC_SC->EXTINT |= 1;
+	LPC_SC->EXTMODE |= 1; //Selecciona interrupcion por flanco
+	LPC_SC->EXTPOLAR &= ~1; //Interrumpe cuando el flanco es de bajada
+	NVIC_EnableIRQ(EINT0_IRQn);
 
 	PINSEL_CFG_Type pwm;
 	pwm.Portnum = 2;
@@ -110,6 +114,8 @@ void confPines() {
 	uart.Pinmode = PINSEL_PINMODE_PULLUP;
 	uart.Funcnum = 1;
 	PINSEL_ConfigPin(&uart);
+	uart.Pinnum = 11;
+	PINSEL_ConfigPin(&uart);
 
 	return;
 }
@@ -130,17 +136,18 @@ void ADC_IRQHandler() {
 
 	uint8_t j;
 	uint8_t escalon = 0;
-	datos[0] = ADC_ChannelGetData(LPC_ADC, 0);
+	adc[0] = ADC_ChannelGetData(LPC_ADC, 0);
 
-	for (j=0; j<17; j++) {
-		if (abs((steps[j+1]-datos[0])) < abs((steps[j]-datos[0])))
+	for (j=0; j<18; j++) {
+		if (abs((steps[j+1]-adc[0])) < abs((steps[j]-adc[0])))
 		escalon = j+1;
 	}
-		LPC_PWM1->MR1 = aux[escalon]/2;
+		LPC_PWM1->MR1 = (aux[escalon]-aux[pos])/2+400;
 		LPC_PWM1->LER |= (1<<1);
 
 		//delay3();
 		LPC_ADC->ADGDR &= LPC_ADC->ADGDR;
+		return;
 }
 //	datos[1] = ADC_ChannelGetData(LPC_ADC, 1);
 //	LPC_ADC->ADGDR &= LPC_ADC->ADGDR;
@@ -227,8 +234,29 @@ void TIMER0_IRQHandler () {
 void confDMA() {
 
 	GPDMA_Init();
-	GPDMA_LLI_Type listaLDR;
+
+/*	GPDMA_LLI_Type listaUART;
+
+	listaUART.SrcAddr = (uint32_t) &info;
+	listaUART.DstAddr = GPDMA_CONN_UART2_Tx;
+	listaUART.NextLLI = (uint32_t) &listaUART;
+	listaUART.Control = 20 | (2<<18) | (2<<21) | (1<<27);
+
+	GPDMA_Channel_CFG_Type uart;
+	uart.ChannelNum = 2;
+	uart.TransferSize = 17;
+	uart.TransferWidth = 0;
+	uart.SrcMemAddr = (uint32_t) &info;
+	uart.DstMemAddr = 0;
+	uart.TransferType = GPDMA_TRANSFERTYPE_M2P;
+	uart.SrcConn = 0;
+	uart.DstConn = GPDMA_CONN_UART2_Tx;
+	uart.DMALLI = 0;
+	GPDMA_Setup(&uart);
+/*	GPDMA_LLI_Type listaLDR;
 	GPDMA_LLI_Type listaLDR2;
+x
+
 
 	listaLDR.SrcAddr = (uint32_t) &LPC_ADC->ADDR0;
 	listaLDR.DstAddr = 0x2007C000;
@@ -242,7 +270,7 @@ void confDMA() {
 
 	GPDMA_Channel_CFG_Type ldr;
 	GPDMA_Channel_CFG_Type ldr2;
-	GPDMA_Channel_CFG_Type uart;
+
 
 	ldr.ChannelNum = 0;
 	ldr.TransferSize = 1;
@@ -264,49 +292,97 @@ void confDMA() {
 	ldr2.DstConn = 0;
 	ldr2.DMALLI = (uint32_t) &listaLDR2;
 
-	uart.ChannelNum = 2;
-	uart.TransferSize = 2;
-	uart.TransferWidth = 0;
-	uart.SrcMemAddr = 0x2007C000;
-	uart.DstMemAddr = 0;
-	uart.TransferType = GPDMA_TRANSFERTYPE_M2P;
-	uart.SrcConn = 0;
-	uart.DstConn = GPDMA_CONN_UART0_Tx;
-	uart.DMALLI = 0;
-
 	GPDMA_Setup(&ldr);
 	GPDMA_Setup(&ldr2);
-	GPDMA_Setup(&uart);
 
 	GPDMA_ChannelCmd(0, ENABLE);
 	GPDMA_ChannelCmd(1, ENABLE);
-
+*/
 	return;
 }
 
 void confUART() {
-	UART_CFG_Type uart;
+/*	UART_CFG_Type uart;
 	uart.Baud_rate = 9600;
 	uart.Databits = UART_DATABIT_8;
 	uart.Parity = UART_PARITY_NONE;
 	uart.Stopbits = UART_STOPBIT_1;
+*/
+	UART_CFG_Type uartCfg;
+	UART_FIFO_CFG_Type uartFifo;
+	//configuraci�n por defecto:
+	UART_ConfigStructInit(&uartCfg);
+	//inicializa perif�rico
+	UART_Init(LPC_UART2, &uartCfg);
 
-	UART_Init(LPC_UART0, &uart);
+	uartFifo.FIFO_DMAMode = ENABLE;
+	uartFifo.FIFO_Level = UART_FIFO_TRGLEV0;
+	uartFifo.FIFO_ResetRxBuf = ENABLE;
+	uartFifo.FIFO_ResetTxBuf = DISABLE;
+	//Inicializa FIFO
+	UART_FIFOConfig(LPC_UART2, &uartFifo);
+	//Habilita transmisi�n
+	UART_TxCmd(LPC_UART2, ENABLE);
+	return;
 }
 
 void EINT0_IRQHandler() {
 
-	if (LPC_GPDMA->DMACEnbldChns && 0x8 == 0)
-		GPDMA_ChannelCmd(4, ENABLE);
-	else
-		GPDMA_ChannelCmd(4, DISABLE);
+	GPDMA_LLI_Type lista1;
+	GPDMA_LLI_Type lista2;
 
+	lista1.SrcAddr = (uint32_t) &info;
+	lista1.DstAddr = GPDMA_CONN_UART2_Tx;
+	lista1.NextLLI = (uint32_t) &lista2;
+	lista1.Control = 17 | ~(0b111<<18) | (2<<21) | (1<<26);
+
+	lista2.SrcAddr = (uint32_t) &info2;
+	lista2.DstAddr = GPDMA_CONN_UART2_Tx;
+	lista2.NextLLI = 0;
+	lista2.Control = 25 | (0b111<<18) | (2<<21) | (1<<27);
+
+	GPDMA_Channel_CFG_Type uart;
+	uart.ChannelNum = 2;
+	uart.TransferSize = 16;
+	uart.TransferWidth = 0;
+	uart.SrcMemAddr = (uint32_t) &info;
+	uart.DstMemAddr = 0;
+	uart.TransferType = GPDMA_TRANSFERTYPE_M2P;
+	uart.SrcConn = 0;
+	uart.DstConn = GPDMA_CONN_UART2_Tx;
+	uart.DMALLI = &lista1;
+
+	GPDMA_Setup(&uart);
+
+	GPDMA_ChannelCmd(2, ENABLE);
+
+	LPC_SC->EXTINT |= 1;
+/*
+	char tension[32];
+	char posi[32];
+	char info[] = {"La tension es: "};
+	char info2[] = {"La posicion angular es: "};
+
+	itoa(3.3/4096*datos[0], tension, 10);
+	itoa(pos, &posi, 10);
+	UART_Send(LPC_UART2, info, sizeof(info), BLOCKING);
+	UART_Send(LPC_UART2, tension, sizeof(tension), BLOCKING);
+	UART_Send(LPC_UART2, info2, sizeof(info2),BLOCKING);
+	UART_Send(LPC_UART2, posi, sizeof(posi), BLOCKING);
+//	UART_SendByte(LPC_UART2, pos+48);
+	UART_Send(LPC_UART2, &pos, 1, BLOCKING);
+	if ((LPC_GPDMA->DMACEnbldChns && 0x4) == 0) {
+		GPDMA_ChannelCmd(2, ENABLE);
+	}
+	else
+		GPDMA_ChannelCmd(2, DISABLE);
+*/
 	return;
 }
-
-void delay3() {
+/*void delay3() {
 	uint32_t i;
-	for (i=0; i<10000000; i++) {
+	for (i=0; i<5000000; i++) {
 	}
 	return;
 }
+*/
