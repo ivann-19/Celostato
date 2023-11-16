@@ -10,16 +10,22 @@
 #include 	<stdlib.h>
 #include	<stdio.h>
 #include 	<string.h>
+#include	<stdint.h>
 
 
 uint32_t adc[2];
 //char* datos = (char*) 0x2007C000;
-char info[] = {"La tension es: "};
-char info2[] = {"\nLa posicion angular es: "};
+char info[24] = {"El punto fijo esta a: "};
+char info2[34] = {"\nLa posicion angular del sol es: "};
+char anguloSol[4];
+char anguloFijo[4];
+char result[70];
+
 uint32_t aux[19];
 uint32_t steps[19];
 //uint32_t* pos = (uint32_t*) 0x2007D000;
 uint8_t pos = 0;
+uint8_t escalon = 0;
 
 void confPines();
 void confTimers();
@@ -29,6 +35,8 @@ void confDMA();
 void confADC();
 void delayTim();
 void delay3();
+static char * _float_to_char(float x, char *p);
+void floatToString(float num, char *str, uint8_t precision);
 
 int main () {
 	uint32_t i;
@@ -114,19 +122,35 @@ void confADC() {
 void ADC_IRQHandler() {
 
 	uint8_t j;
-	uint8_t escalon = 0;
 	adc[0] = ADC_ChannelGetData(LPC_ADC, 0);
 
 	for (j=0; j<18; j++) {
 		if (abs((steps[j+1]-adc[0])) < abs((steps[j]-adc[0])))
 		escalon = j+1;
 	}
-		LPC_PWM1->MR1 = (aux[escalon]-aux[pos])/2+400;
-		LPC_PWM1->LER |= (1<<1);
+	itoa(10*escalon, &anguloSol, 10);
+	itoa(10*pos, &anguloFijo, 10);
+//	*tension = _float_to_char(3.3/4096*adc[0], &tension);
 
-		LPC_ADC->ADGDR &= LPC_ADC->ADGDR;
+	if(escalon<10)
+		anguloSol[2] = NULL;
+	if(pos<10)
+		anguloFijo[2] = NULL;
 
-		return;
+	strcpy(result, "");
+	strcat(result, info);
+	strcat(result, anguloFijo);
+	strcat(result, "°");
+	strcat(result, info2);
+	strcat(result, anguloSol);
+	strcat(result, "°\n\n");
+
+	LPC_PWM1->MR1 = (aux[escalon]-aux[pos])/2+400;
+	LPC_PWM1->LER |= (1<<1);
+
+	LPC_ADC->ADGDR &= LPC_ADC->ADGDR;
+
+	return;
 }
 
 void confPWM() {
@@ -178,31 +202,36 @@ void TIMER0_IRQHandler () {
 
 void confDMA() {
 
+/*	GPDMA_ChannelCmd(2, DISABLE);
 	GPDMA_LLI_Type lista1;
-	GPDMA_LLI_Type lista2;
 
 	lista1.SrcAddr = (uint32_t) &info;
 	lista1.DstAddr = GPDMA_CONN_UART2_Tx;
-	lista1.NextLLI = (uint32_t) &lista2;
-	lista1.Control = 16 | ~(0b111<<18) | ~(0b111<<21) | (1<<26);
+	lista1.NextLLI = (uint32_t) &lista3;
+	lista1.Control = 17 | (2<<18) | (2<<21) | (1<<26);
 
-	lista2.SrcAddr = (uint32_t) &info2;
-	lista2.DstAddr = GPDMA_CONN_UART2_Tx;
-	lista2.NextLLI = 0;
-	lista2.Control = 26 | ~(0b111<<18) | ~(0b111<<21) | (1<<26);
+	lista3.SrcAddr = (uint32_t) &info2;
+	lista3.DstAddr = GPDMA_CONN_UART2_Tx;
+	lista3.NextLLI = 0;
+	lista3.Control = 29 | (2<<18) | (2<<21) | (1<<26);
 
+	lista4.SrcAddr = (uint32_t) &angulo;
+	lista4.DstAddr = GPDMA_CONN_UART2_Tx;
+	lista4.NextLLI = 0;
+	lista4.Control = 4 | (2<<18) | (2<<21) | (1<<26);
+*/
 	GPDMA_Init();
 
 	GPDMA_Channel_CFG_Type uart;
 	uart.ChannelNum = 2;
-	uart.TransferSize = 42;
+	uart.TransferSize = 65;
 	uart.TransferWidth = 0;
-	uart.SrcMemAddr = (uint32_t) &info;
+	uart.SrcMemAddr = (uint32_t) &result;
 	uart.DstMemAddr = 0;
 	uart.TransferType = GPDMA_TRANSFERTYPE_M2P;
 	uart.SrcConn = 0;
 	uart.DstConn = GPDMA_CONN_UART2_Tx;
-	uart.DMALLI = (uint32_t) &lista1;
+	uart.DMALLI = 0;
 
 	GPDMA_Setup(&uart);
 	GPDMA_ChannelCmd(2, ENABLE);
@@ -248,11 +277,19 @@ void confUART() {
 void EINT0_IRQHandler() {
 
 	delay3();
+
 	confDMA();
 	LPC_SC->EXTINT |= 1;
-
 	return;
 }
+
+void delay3() {
+	uint32_t i;
+	for (i=0; i<2500000; i++) {
+	}
+	return;
+}
+
 /*	GPDMA_LLI_Type lista1;
 	//GPDMA_LLI_Type lista2;
 
@@ -272,7 +309,6 @@ void EINT0_IRQHandler() {
 	char info[] = {"La tension es: "};
 	char info2[] = {"La posicion angular es: "};
 
-	itoa(3.3/4096*datos[0], tension, 10);
 	itoa(pos, &posi, 10);
 	UART_Send(LPC_UART2, info, sizeof(info), BLOCKING);
 	UART_Send(LPC_UART2, tension, sizeof(tension), BLOCKING);
@@ -286,11 +322,29 @@ void EINT0_IRQHandler() {
 	else
 		GPDMA_ChannelCmd(2, DISABLE);
 */
+/*static char * _float_to_char(float x, char *p) {
+    char *s = p + 5; // go to end of buffer
+    uint16_t decimals;  // variable to store the decimals
+    int units;  // variable to store the units (part to left of decimal place)
+    if (x < 0) { // take care of negative numbers
+        decimals = (int)(x * -100) % 100; // make 1000 for 3 decimals etc.
+        units = (int)(-1 * x);
+    } else { // positive numbers
+        decimals = (int)(x * 100) % 100;
+        units = (int)x;
+    }
 
+    *--s = (decimals % 10) + '0';
+    decimals /= 10; // repeat for as many decimal places as you need
+    *--s = (decimals % 10) + '0';
+    *--s = '.';
 
-void delay3() {
-	uint32_t i;
-	for (i=0; i<1000000; i++) {
-	}
-	return;
+    while (units > 0) {
+        *--s = (units % 10) + '0';
+        units /= 10;
+    }
+    if (x < 0) *--s = '-'; // unary minus sign for negative numbers
+    return s;
 }
+
+*/
