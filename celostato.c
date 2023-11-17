@@ -13,18 +13,18 @@
 #include	<stdint.h>
 
 
-uint32_t adc[2];
-//char* datos = (char*) 0x2007C000;
+uint32_t adc[2];		//Datos del ADC
 char info[24] = {"El punto fijo esta a: "};
 char info2[34] = {"\nLa posicion angular del sol es: "};
-char anguloSol[4];
-char anguloFijo[4];
-char result[70];
+char anguloSol[4];		//Varible que almacena angulo del sol
+char anguloFijo[4];		//Variable que almacena angulo prefijado de salida
+char result[70];		//String para UART
 
 uint32_t aux[19];
 uint32_t steps[19];
 //uint32_t* pos = (uint32_t*) 0x2007D000;
-uint8_t pos = 0;
+uint32_t arrow[1] = {0};
+uint8_t pos[1] = {0};
 uint8_t escalon = 0;
 
 void confPines();
@@ -35,16 +35,15 @@ void confDMA();
 void confADC();
 void delayTim();
 void delay3();
-static char * _float_to_char(float x, char *p);
-void floatToString(float num, char *str, uint8_t precision);
+//static char * _float_to_char(float x, char *p);
 
 int main () {
 	uint32_t i;
-
-	for (i=0; i<19; i++) {
+	LPC_PWM1->MR1 = 400;
+	for (i=0; i<19; i++) {		//Pasos a cargar a PWM (400 a 2500 us)
 		aux[i] = 400+i*116.66;
 	}
-	for (i=0; i<19; i++) {
+	for (i=0; i<19; i++) {		//Discretiza pasos del ADC
 		steps[i] = 227.5*i;
 	}
 	confPines();
@@ -61,7 +60,7 @@ int main () {
 }
 
 void confPines() {
-
+	//Configura pin 0.0
 	PINSEL_CFG_Type aux;
 	aux.Portnum = 0;
 	aux.Pinnum = 0;
@@ -89,6 +88,7 @@ void confPines() {
 	LPC_SC->EXTPOLAR &= ~1; //Interrumpe cuando el flanco es de bajada
 	NVIC_EnableIRQ(EINT0_IRQn);
 
+	//Configura pin 2.0 PWM1.1
 	PINSEL_CFG_Type pwm;
 	pwm.Portnum = 2;
 	pwm.Pinnum = 0;
@@ -112,9 +112,9 @@ void confPines() {
 void confADC() {
 
 	ADC_Init(LPC_ADC, 2);			//Lee incidencia de luz 2 veces/seg
-	ADC_IntConfig(LPC_ADC, ADC_ADINTEN0, ENABLE);
-	ADC_BurstCmd(LPC_ADC, ENABLE);
-	NVIC_EnableIRQ(ADC_IRQn);
+	ADC_IntConfig(LPC_ADC, ADC_ADINTEN0, ENABLE);	//Habilita int. canal 0 ADC
+	ADC_BurstCmd(LPC_ADC, ENABLE);					//Modo burst
+	NVIC_EnableIRQ(ADC_IRQn);						//Habilita int. ADC
 
 	return;
 }
@@ -128,15 +128,16 @@ void ADC_IRQHandler() {
 		if (abs((steps[j+1]-adc[0])) < abs((steps[j]-adc[0])))
 		escalon = j+1;
 	}
-	itoa(10*escalon, &anguloSol, 10);
-	itoa(10*pos, &anguloFijo, 10);
+	itoa(10*escalon, &anguloSol, 10);	//Convierte int a string angulo del sol
+	itoa(10*pos[0], &anguloFijo, 10);		//Idem angulo prefijado
 //	*tension = _float_to_char(3.3/4096*adc[0], &tension);
 
 	if(escalon<10)
-		anguloSol[2] = NULL;
+		anguloSol[2] = NULL;	//Si el angulo es menor a 100°, borra la tercera cifra
 	if(pos<10)
-		anguloFijo[2] = NULL;
+		anguloFijo[2] = NULL;	//Idem angulo fijo
 
+	//Rutina de construcción de string transmisión UART
 	strcpy(result, "");
 	strcat(result, info);
 	strcat(result, anguloFijo);
@@ -145,10 +146,12 @@ void ADC_IRQHandler() {
 	strcat(result, anguloSol);
 	strcat(result, "°\n\n");
 
-	LPC_PWM1->MR1 = (aux[escalon]-aux[pos])/2+400;
-	LPC_PWM1->LER |= (1<<1);
-
-	LPC_ADC->ADGDR &= LPC_ADC->ADGDR;
+	//Si el ángulo del espejo es mayor a 90°, ignora
+	if (((escalon-pos[0])/2) <= 9) {
+		LPC_PWM1->MR1 = abs((aux[pos[0]]-aux[escalon]))/2+400;	//Envía a MR1 el duty correspondiente a la bisectriz entre el angulo del sol y el de incidencia
+		LPC_PWM1->LER |= (1<<1);	//Latch enable PWM
+	}
+	LPC_ADC->ADGDR &= LPC_ADC->ADGDR;	//Limpia int. ADC
 
 	return;
 }
@@ -156,21 +159,21 @@ void ADC_IRQHandler() {
 void confPWM() {
 
 	CLKPWR_SetPCLKDiv(CLKPWR_PCLKSEL_PWM1, CLKPWR_PCLKSEL_CCLK_DIV_1);
-	LPC_PWM1->PCR = 0x0; // Single edge PWM para 6 CH
-	LPC_PWM1->PR = 99;
-	LPC_PWM1->MCR = (1 << 1);                                                                   // Reset PWM TC on PWM1MR0 match
+	LPC_PWM1->PCR = 0x0; 	//Single edge PWM
+	LPC_PWM1->PR = 99;		//Prescaler
+	LPC_PWM1->MCR = (1 << 1);                                                       // Reset PWM TC on PWM1MR0 match
 
-	LPC_PWM1->MR0 = 20000; //
+	LPC_PWM1->MR0 = 20000; 			//Periodo de 20 ms MR0 para el servo
 
-	LPC_PWM1->LER = (1 << 0); // update values in MR0 and MR1
-	LPC_PWM1->PCR = (1 << 9);      // enable PWM outputs
-	LPC_PWM1->TCR = 3;                                                                          // Reset PWM TC & PR
+	LPC_PWM1->LER = (1 << 0); 		//Actualiza valor MR0
+	LPC_PWM1->PCR = (1 << 9);      	//Habilita PWM1.1
+	LPC_PWM1->TCR = 3;              //Reset contador                                                          // Reset PWM TC & PR
 	LPC_PWM1->TCR |= (1 << 3);                                                                  // enable counters and PWM Mode
-	LPC_PWM1->TCR &= ~(1 << 1);
+	LPC_PWM1->TCR &= ~(1 << 1);		//Inicio cuenta
 
 	return;
 }
-
+/*
 void confTimers() {
 	CLKPWR_SetPCLKDiv(CLKPWR_PCLKSEL_TIMER0, CLKPWR_PCLKSEL_CCLK_DIV_1);
 
@@ -199,7 +202,7 @@ void TIMER0_IRQHandler () {
 	LPC_TIM0->IR |= 1;
 	return;
 }
-
+*/
 void confDMA() {
 
 /*	GPDMA_ChannelCmd(2, DISABLE);
@@ -271,18 +274,39 @@ void confUART() {
 	UART_FIFOConfig(LPC_UART2, &uartFifo);
 	//Habilita transmisi�n
 	UART_TxCmd(LPC_UART2, ENABLE);
+	// Habilita interrupci�n por el RX del UART
+	UART_IntConfig(LPC_UART2, UART_INTCFG_RBR, ENABLE);
+	// Habilita interrupci�n por el estado de la linea UART
+	UART_IntConfig(LPC_UART2, UART_INTCFG_RLS, ENABLE);
+	//NVIC_SetPriority(UART2_IRQn, 1);
+	//Habilita interrupci�n por UART2
+	NVIC_EnableIRQ(UART2_IRQn);
 	return;
 }
 
 void EINT0_IRQHandler() {
 
 	delay3();
-
 	confDMA();
 	LPC_SC->EXTINT |= 1;
 	return;
 }
 
+void UART2_IRQHandler(void) {
+		uint8_t i = 0;
+		arrow[0] = 0;
+
+		UART_Receive(LPC_UART2, arrow, sizeof(arrow), NONE_BLOCKING);
+		if (arrow[0] == 66) {
+			if (!(pos[0]>8))
+			pos[0]++;
+		}
+		if (arrow[0] == 65) {
+			if (!(pos[0]<1))
+				pos[0]--;
+		}
+		return;
+}
 void delay3() {
 	uint32_t i;
 	for (i=0; i<2500000; i++) {
@@ -346,5 +370,4 @@ void delay3() {
     if (x < 0) *--s = '-'; // unary minus sign for negative numbers
     return s;
 }
-
 */
